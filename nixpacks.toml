@@ -1,2 +1,11 @@
+# nixpacks.toml
 [phases.setup]
-nixPkgs = ["tzdata"]
+nixPkgs = ["python3", "gcc"] # Menambahkan python3 agar perintah 'python' tersedia
+
+[phases.install]
+# Biarkan Nixpacks menangani pembuatan venv dan instalasi dependensi secara default.
+# Menghapus override di sini mencegah konflik.
+# cmds = ["pip install -r requirements.txt"] 
+
+[start]
+cmd = "python main.py"
