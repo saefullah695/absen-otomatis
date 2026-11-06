@@ -1,0 +1,77 @@
+/**
+ * doPost — Terima data absen dari Python, UPSERT ke Spreadsheet.
+ * Kunci unik: NIK + Tanggal. API selalu menang (tidak ada kolom manual).
+ */
+
+function doPost(e) {
+  try {
+    var SPREADSHEET_ID = "1tYU751Rq80uYQQY7lvYqPUkrTKz5TN2r7mI0euiSzXA";
+
+    if (!e || !e.postData || !e.postData.contents) {
+      return _json({ status: "error", message: "No postData" });
+    }
+
+    var data = JSON.parse(e.postData.contents);
+    var karyawanList = (data.data && data.data.data_karyawan) || [];
+
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName("Data") || ss.getSheets()[0];
+
+    // Pastikan header ada (hanya sekali saat sheet kosong)
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow([
+        'NIK', 'Nama', 'Jabatan', 'Toko', 'Tanggal',
+        'Shift', 'Masuk', 'Keluar', 'Keterangan'
+      ]);
+    }
+
+    // Baca data lama → map kunci "NIK|Tanggal" → rowIndex (1-based)
+    var existing = sheet.getDataRange().getValues();
+    var map = {};
+    for (var r = 1; r < existing.length; r++) {
+      map[existing[r][0] + "|" + existing[r][4]] = r + 1;
+    }
+
+    var updated = 0, inserted = 0;
+
+    // Upsert: update kalau ada, insert kalau baru
+    for (var i = 0; i < karyawanList.length; i++) {
+      var k = karyawanList[i];
+      for (var key in k) {
+        if (key.length === 10 && key.indexOf("-") > 0) {
+          var v = k[key] || {};
+          var row = [
+            k.nik, k.nama, k.jabatan, k.nama_store, key,
+            v.shift || '-', v.masuk || '-', v.keluar || '-', v.ket || '-'
+          ];
+          var kunci = k.nik + "|" + key;
+
+          if (map[kunci]) {
+            sheet.getRange(map[kunci], 1, 1, 9).setValues([row]);
+            updated++;
+          } else {
+            sheet.appendRow(row);
+            map[kunci] = sheet.getLastRow();
+            inserted++;
+          }
+        }
+      }
+    }
+
+    return _json({
+      status: "success",
+      updated: updated,
+      inserted: inserted,
+      total: updated + inserted
+    });
+
+  } catch (error) {
+    return _json({ status: "error", message: error.toString() });
+  }
+}
+
+function _json(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
