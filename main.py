@@ -1,6 +1,6 @@
 """
 Sync Time Management SAT -> Google Spreadsheet
-Jadwal: setiap hari jam 01:00 WIB
+Jadwal: setiap 3 jam sekali WIB (00,03,06,09,12,15,18,21)
 Deploy: ZevCloud Worker
 """
 
@@ -23,6 +23,10 @@ SECRET_TOTP      = os.environ["SECRET_TOTP"]
 GAS_WEB_APP_URL  = os.environ["GAS_WEB_APP_URL"]
 
 WIB = ZoneInfo("Asia/Jakarta")
+
+# Jam eksekusi: setiap 3 jam, aligned ke jam bulat WIB
+JADWAL_JAM = ["00:00", "03:00", "06:00", "09:00",
+              "12:00", "15:00", "18:00", "21:00"]
 
 HEADERS = {
     'User-Agent': (
@@ -80,7 +84,7 @@ def run_sync():
 
         # ---------- 4. Tarik data API Time Management ----------
         log("4. Menarik data API Time Management...")
-        periode = datetime.now(WIB).strftime("01-%m-%Y")  # pakai WIB
+        periode = datetime.now(WIB).strftime("01-%m-%Y")
 
         url_api = "https://hctm0201.sat.co.id/input_shift/pick/data"
         params = {
@@ -92,7 +96,6 @@ def run_sync():
             'kode_branch': 'KZ01',
         }
 
-        # sinkronisasi cookie/domain
         session.get("https://hctm0201.sat.co.id/input_shift")
         res_data = session.get(url_api, params=params, timeout=60)
 
@@ -107,9 +110,7 @@ def run_sync():
         # ---------- 5. Kirim ke Google Spreadsheet ----------
         log("5. Mengirim data ke Google Spreadsheet...")
         try:
-            res_gas = requests.post(
-                GAS_WEB_APP_URL, json=json_data, timeout=120
-            )
+            res_gas = requests.post(GAS_WEB_APP_URL, json=json_data, timeout=120)
             if res_gas.status_code == 200:
                 log(f"🎉 SUKSES! Respon: {res_gas.text[:300]}")
             else:
@@ -123,7 +124,7 @@ def run_sync():
 
 
 # ==========================================================
-#  SCHEDULER — SETIAP HARI 01:00 WIB
+#  SCHEDULER — SETIAP 3 JAM (aligned ke jam bulat WIB)
 # ==========================================================
 if __name__ == "__main__":
     log("=" * 60)
@@ -132,19 +133,22 @@ if __name__ == "__main__":
     log(f"NIK            : {NIK[:4]}****")
     log("=" * 60)
 
-    # (Opsional) Jalankan sekali saat worker start:
+    # (Opsional) jalankan sekali saat worker start:
     # run_sync()
 
-    schedule.every().day.at("01:00").do(run_sync)
-    log("⏰ Scheduler aktif: setiap hari jam 01:00 WIB")
+    for jam in JADWAL_JAM:
+        schedule.every().day.at(jam).do(run_sync)
+
+    log(f"⏰ Scheduler aktif: setiap 3 jam → {', '.join(JADWAL_JAM)} WIB")
     log("   Worker berjalan. Tekan Ctrl+C untuk stop (di lokal).\n")
 
     while True:
         try:
             schedule.run_pending()
+            time.sleep(20)
         except KeyboardInterrupt:
             log("👋 Scheduler dihentikan.")
             break
         except Exception as e:
             log(f"❌ Error di loop scheduler: {e}")
-        time.sleep(30)
+            time.sleep(30)
