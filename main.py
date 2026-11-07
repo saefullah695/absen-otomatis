@@ -28,6 +28,8 @@ WIB = ZoneInfo("Asia/Jakarta")
 JADWAL_JAM = ["00:00", "03:00", "06:00", "09:00",
               "12:00", "15:00", "18:00", "21:00"]
 
+PAGE_LIMIT = 100
+
 HEADERS = {
     'User-Agent': (
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -82,35 +84,60 @@ def run_sync():
 
         log("✅ Login Berhasil! Cookie didapat.")
 
-        # ---------- 4. Tarik data API Time Management ----------
+        # ---------- 4. Tarik data API Time Management (PAGINATION) ----------
         log("4. Menarik data API Time Management...")
         periode = datetime.now(WIB).strftime("01-%m-%Y")
 
         url_api = "https://hctm0201.sat.co.id/input_shift/pick/data"
-        params = {
-            'limit': 100,
-            'offset': 0,
-            'search_filter': '',
-            'periode': periode,
-            'lokasi': 'A',
-            'kode_branch': 'KZ01',
-        }
-
         session.get("https://hctm0201.sat.co.id/input_shift")
-        res_data = session.get(url_api, params=params, timeout=60)
 
-        if res_data.status_code != 200:
-            log(f"❌ Gagal tarik data. Status: {res_data.status_code}")
-            log(f"   Body: {res_data.text[:300]}")
+        all_rows = []
+        offset = 0
+        while True:
+            params = {
+                'limit': PAGE_LIMIT,
+                'offset': offset,
+                'search_filter': '',
+                'periode': periode,
+                'lokasi': 'A',
+                'kode_branch': 'KZ01',
+            }
+            res_data = session.get(url_api, params=params, timeout=60)
+
+            if res_data.status_code != 200:
+                log(f"❌ Gagal tarik data. Status: {res_data.status_code}")
+                log(f"   Body: {res_data.text[:300]}")
+                return
+
+            json_page = res_data.json()
+            rows = (json_page.get('data') or {}).get('data_karyawan') or []
+            all_rows.extend(rows)
+            log(f"   Halaman offset={offset} → {len(rows)} baris (total {len(all_rows)})")
+
+            if len(rows) < PAGE_LIMIT:
+                break
+            offset += PAGE_LIMIT
+
+        if not all_rows:
+            log("⚠️ Tidak ada data karyawan. Skip kirim.")
             return
 
-        json_data = res_data.json()
-        log(f"✅ Data ditarik. Periode: {periode}")
+        # Gabungkan ke struktur asli
+        json_data = json_page  # struktur terakhir (metadata periode dsb)
+        json_data.setdefault('data', {})
+        json_data['data']['data_karyawan'] = all_rows
+
+        log(f"✅ Data ditarik total {len(all_rows)} baris. Periode: {periode}")
+
+        # Log sample key tanggal untuk verifikasi format
+        sample_keys = [k for k in all_rows[0].keys()
+                       if isinstance(k, str) and len(k) == 10 and '-' in k][:3]
+        log(f"   Sample key tanggal dari API: {sample_keys}")
 
         # ---------- 5. Kirim ke Google Spreadsheet ----------
         log("5. Mengirim data ke Google Spreadsheet...")
         try:
-            res_gas = requests.post(GAS_WEB_APP_URL, json=json_data, timeout=120)
+            res_gas = requests.post(GAS_WEB_APP_URL, json=json_data, timeout=180)
             if res_gas.status_code == 200:
                 log(f"🎉 SUKSES! Respon: {res_gas.text[:300]}")
             else:
